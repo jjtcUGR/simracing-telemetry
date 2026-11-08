@@ -2,10 +2,8 @@
 # Servicio de Búsqueda (Read API). Contexto de construcción: raíz del repositorio.
 #   docker build -f services/busqueda/Dockerfile -t simracing-busqueda .
 
-ARG PYTHON_IMAGE=python:3.13.13-slim-trixie
-
 # ---------- Etapa 1: dependencias en un entorno virtual aislado ----------
-FROM ${PYTHON_IMAGE} AS dependencias
+FROM python:3.13.13-slim-trixie AS dependencias
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -13,7 +11,7 @@ COPY requirements/base.txt requirements/api.txt /tmp/requirements/
 RUN pip install --no-cache-dir -r /tmp/requirements/api.txt
 
 # ---------- Etapa 2: imagen final mínima, sin herramientas de construcción ----------
-FROM ${PYTHON_IMAGE} AS final
+FROM python:3.13.13-slim-trixie AS final
 LABEL org.opencontainers.image.title="simracing-telemetry-busqueda" \
       org.opencontainers.image.description="Read API: ranking de setups, sesiones y comparativas" \
       org.opencontainers.image.source="https://github.com/jjtcUGR/simracing-telemetry"

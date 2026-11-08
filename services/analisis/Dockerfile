@@ -2,10 +2,8 @@
 # Worker de Análisis (sin HTTP). Contexto de construcción: raíz del repositorio.
 #   docker build -f services/analisis/Dockerfile -t simracing-analisis .
 
-ARG PYTHON_IMAGE=python:3.13.13-slim-trixie
-
 # ---------- Etapa 1: dependencias (sin FastAPI ni Uvicorn: el worker no las necesita) ----------
-FROM ${PYTHON_IMAGE} AS dependencias
+FROM python:3.13.13-slim-trixie AS dependencias
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
@@ -13,7 +11,7 @@ COPY requirements/base.txt /tmp/requirements/
 RUN pip install --no-cache-dir -r /tmp/requirements/base.txt
 
 # ---------- Etapa 2: imagen final mínima ----------
-FROM ${PYTHON_IMAGE} AS final
+FROM python:3.13.13-slim-trixie AS final
 LABEL org.opencontainers.image.title="simracing-telemetry-analisis" \
       org.opencontainers.image.description="Worker que analiza sesiones y actualiza el ranking de setups" \
       org.opencontainers.image.source="https://github.com/jjtcUGR/simracing-telemetry"
