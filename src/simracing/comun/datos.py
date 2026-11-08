@@ -99,6 +99,9 @@ class CacheRedis:
     def __init__(self, cliente: aioredis.Redis) -> None:
         self._r = cliente
 
+    async def ping(self) -> None:
+        await self._r.ping()
+
     async def obtener(self, clave: str) -> Any | None:
         valor = await self._r.get(clave)
         return json.loads(valor) if valor is not None else None
