@@ -2,7 +2,7 @@
 
 Proyecto de prácticas de la asignatura **Cloud Computing: Fundamentos e Infraestructuras** (Máster en Ingeniería Informática, UGR, curso 2026-27).
 
-> **Estado actual:** Hito 1 — Definición del proyecto, modelo de negocio y arquitectura de referencia.
+> **Estado actual:** Hito 2 — Empaquetado Cloud Native, entorno local e integración continua. Ver [cómo arrancarlo en local](#11-entorno-local).
 
 ## Índice
 1. [Descripción del dominio](#1-descripción-del-dominio)
@@ -15,6 +15,10 @@ Proyecto de prácticas de la asignatura **Cloud Computing: Fundamentos e Infraes
 8. [Stack tecnológico](#8-stack-tecnológico)
 9. [Gestión del proyecto](#9-gestión-del-proyecto)
 10. [Hoja de ruta](#10-hoja-de-ruta)
+11. [Entorno local](#11-entorno-local)
+12. [Contenedores](#12-contenedores)
+13. [Integración continua](#13-integración-continua)
+14. [Estructura del repositorio](#14-estructura-del-repositorio)
 
 ---
 
@@ -175,19 +179,21 @@ Resultado del análisis que añade el worker:
     "consistencia_ms": 283,
     "vueltas_invalidas": 0,
     "sector_mas_debil": 2,
-    "puntuacion_setup": 87.5
+    "puntuacion_setup": 95.6
   }
 }
 ```
 
+La **puntuación del setup** (0-100) combina un 80 % de ritmo y un 20 % de regularidad. El ritmo vale 1 si la vuelta iguala el récord de ese coche, circuito y condiciones, y baja linealmente hasta 0 en el 107 % del récord. La regularidad es `1 / (1 + consistencia_ms / 1000)`. En el ranking se recalcula contra el récord del conjunto consultado, así que una vuelta nueva más rápida reordena a las demás.
+
 ## 8. Stack tecnológico
 
-| Capa | Tecnología propuesta | Motivo |
+| Capa | Tecnología | Motivo |
 | :--- | :--- | :--- |
-| Microservicios | Python 3.12 + FastAPI | Validación de esquemas con Pydantic y documentación OpenAPI automática. |
-| Worker | Python 3.12 + `redis-py` | Mismo lenguaje y modelos compartidos con los servicios. |
-| Persistencia | MongoDB 7 | Documentos flexibles para *setups* distintos según el juego. |
-| Cola y caché | Redis 7 (Streams) | Un solo componente para eventos y caché, ligero de desplegar. |
+| Microservicios | Python 3.13 + FastAPI + Uvicorn | Validación de esquemas con Pydantic y documentación OpenAPI automática (`/docs`). |
+| Worker | Python 3.13 + `redis-py` (asyncio) | Mismo lenguaje y modelos compartidos con los servicios. |
+| Persistencia | MongoDB 8 (driver asíncrono de PyMongo) | Documentos flexibles para *setups* distintos según el juego. |
+| Cola y caché | Redis 7.4 (Streams + claves con TTL) | Un solo componente para eventos y caché, ligero de desplegar. |
 | Pruebas y calidad | pytest, ruff, hadolint | Tests unitarios y de integración, linter de Python y de Dockerfiles. |
 | Contenedores | Docker + Docker Compose | Entorno local reproducible (Hito 2). |
 | Infraestructura | Terraform | Infraestructura como código (Hito 3). |
@@ -208,8 +214,96 @@ Resultado del análisis que añade el worker:
 
 | Hito | Contenido | Estado |
 | :--- | :--- | :--- |
-| 1 | Definición del proyecto, modelo de negocio y arquitectura | En curso |
-| 2 | Contenedores, entorno local con Docker Compose e integración continua | Pendiente |
+| 1 | Definición del proyecto, modelo de negocio y arquitectura | Entregado |
+| 2 | Contenedores, entorno local con Docker Compose e integración continua | En curso |
 | 3 | Infraestructura como código con Terraform y patrón *Reconciler* | Pendiente |
 | 4 | Despliegue continuo, auditoría de *drift* en el pipeline, seguridad y RGPD | Pendiente |
 | 5 | Observabilidad, pruebas de carga y *release* v1.0.0 | Pendiente |
+
+## 11. Entorno local
+
+Requisitos: Docker Engine con el plugin Compose v2.
+
+```bash
+cp .env.example .env          # y cambia las contraseñas
+docker compose up -d --build  # levanta los 5 contenedores
+docker compose ps             # todos deben aparecer como "healthy"
+```
+
+| Servicio | URL | Documentación interactiva |
+| :--- | :--- | :--- |
+| Ingesta | http://localhost:8001 | http://localhost:8001/docs |
+| Búsqueda | http://localhost:8002 | http://localhost:8002/docs |
+
+Para generar datos, el [simulador de telemetría](tools/simulador.py) envía sesiones realistas (varios juegos, coches y circuitos, con vueltas inválidas y anómalas). Solo necesita Python, sin dependencias:
+
+```bash
+python tools/simulador.py --token token-dev-piloto-1 --sesiones 50
+curl "http://localhost:8002/api/setups?vehiculo=porsche_992_gt3_r&circuito=spa_francorchamps"
+```
+
+Los datos de MongoDB y Redis se guardan en los volúmenes `mongo-datos` y `redis-datos`, así que sobreviven a `docker compose down` y `docker compose restart`. `docker compose down -v` los borra.
+
+**Desarrollo sin contenedores:**
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements/dev.txt
+.venv/bin/pytest                      # pruebas unitarias (las de integración se omiten)
+docker compose up -d mongo redis      # para las de integración, con MONGO_URL y REDIS_URL definidas
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
+```
+
+## 12. Contenedores
+
+Cada componente tiene su propio [`Dockerfile`](services/) y se construye desde la raíz del repositorio (el código común está en `src/simracing/comun`).
+
+| Decisión | Motivo |
+| :--- | :--- |
+| **Construcción multietapa** | La etapa `dependencias` crea un entorno virtual con los paquetes; la etapa `final` solo copia ese entorno y el código. `pip` queda fuera de la imagen final, igual que las cachés y los ficheros de requisitos. |
+| **Imagen base `python:3.13-slim` (Debian trixie), versión exacta fijada** | Mucho más ligera que la imagen completa, que incluye compiladores y cabeceras que no hacen falta en ejecución. Usa glibc, así que pydantic-core y pymongo instalan *wheels* precompilados sin compilar nada. Alpine (musl) obligaría a compilar algunas dependencias y apenas ahorra tamaño. Las imágenes *distroless* dependen de la versión de Python de Debian y no traen shell, lo que complica los health checks y la depuración. |
+| **Usuario sin privilegios** | Cada imagen crea el usuario `app` (UID 10001) y se ejecuta con `USER app`. El código pertenece a `root`, así que el proceso puede leerlo pero no modificarlo. |
+| **Dependencias mínimas por servicio** | `requirements/base.txt` (Pydantic, PyMongo, Redis) es común. Las APIs añaden `api.txt` (FastAPI, Uvicorn) y el worker no, por lo que su imagen es más pequeña. |
+| **Caché de capas** | Primero se copian los requisitos y se instalan, y después el código. Cambiar el código no reinstala las dependencias. Un `.dockerignore` de lista blanca deja fuera del contexto todo lo que no son `requirements/` y `src/`. |
+| **Puertos y salud** | Las APIs exponen el puerto 8000 y tienen `HEALTHCHECK` contra `/health`. El worker no expone puertos y su health check (`python -m simracing.analisis.salud`) comprueba MongoDB y Redis. |
+
+En [`compose.yaml`](compose.yaml):
+* **Redes:** la red `publica` solo la usan Ingesta y Búsqueda, que son los únicos servicios que publican puertos. MongoDB, Redis y el worker están en la red `interna` (`internal: true`), que no tiene salida al exterior.
+* **Volúmenes:** `mongo-datos` y `redis-datos` (Redis con `appendonly` para no perder la cola al reiniciar).
+* **Orden de arranque:** los servicios esperan a que MongoDB y Redis estén *healthy* (`depends_on: condition: service_healthy`).
+* **Endurecimiento:** los contenedores propios tienen el sistema de ficheros en solo lectura (`read_only` con `/tmp` en memoria), eliminan todas las *capabilities* (`cap_drop: ALL`) y activan `no-new-privileges`.
+* **Configuración:** todo llega por variables de entorno desde `.env`. [`.env.example`](.env.example) documenta cada variable sin credenciales reales, y Compose se niega a arrancar si falta alguna obligatoria.
+
+## 13. Integración continua
+
+El workflow [`ci.yml`](.github/workflows/ci.yml) se ejecuta en cada *push* y *pull request* a `main` y en las etiquetas `v*.*.*`:
+
+```mermaid
+flowchart LR
+    A[push / PR a main] --> B[calidad<br/>ruff · hadolint · compose config]
+    A --> C[pruebas<br/>pytest + MongoDB y Redis reales]
+    B --> D[imagenes x3<br/>build multietapa]
+    C --> D
+    D -->|push a main o etiqueta| E[(GitHub Container Registry)]
+```
+
+1. **calidad:** `ruff check` y `ruff format --check` para Python, `hadolint` para los tres Dockerfiles y `docker compose config` para validar el manifiesto.
+2. **pruebas:** levanta MongoDB y Redis como *service containers* y ejecuta las pruebas unitarias y de integración con cobertura. Guarda el informe JUnit y el de cobertura como artefactos.
+3. **imagenes:** construye en paralelo las tres imágenes con caché de GitHub Actions. En los *pull requests* solo se construyen, para comprobar que funcionan. En `main` y en las etiquetas se publican en `ghcr.io/jjtcugr/simracing-telemetry-<servicio>` con estas etiquetas:
+   * `sha-<hash>`: el commit exacto (inmutable).
+   * `1.2.3` y `1.2`: la versión semántica, cuando se publica una etiqueta `v1.2.3`.
+   * `latest`: el último commit de `main`.
+
+## 14. Estructura del repositorio
+
+```
+src/simracing/
+  comun/      configuración, modelos Pydantic, cálculos (lógica pura), acceso a MongoDB y Redis, logs JSON
+  ingesta/    Write API (FastAPI)
+  busqueda/   Read API (FastAPI)
+  analisis/   worker de Redis Streams
+services/<servicio>/Dockerfile
+tests/unit/          pruebas sin dependencias externas (dobles en memoria)
+tests/integration/   flujo completo con MongoDB y Redis reales
+tools/simulador.py   generador de sesiones de telemetría
+compose.yaml · .env.example · requirements/ · .github/workflows/ci.yml
+```
