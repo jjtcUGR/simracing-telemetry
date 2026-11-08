@@ -192,7 +192,7 @@ La **puntuación del setup** (0-100) combina un 80 % de ritmo y un 20 % de regul
 | :--- | :--- | :--- |
 | Microservicios | Python 3.13 + FastAPI + Uvicorn | Validación de esquemas con Pydantic y documentación OpenAPI automática (`/docs`). |
 | Worker | Python 3.13 + `redis-py` (asyncio) | Mismo lenguaje y modelos compartidos con los servicios. |
-| Persistencia | MongoDB 8 (driver asíncrono de PyMongo) | Documentos flexibles para *setups* distintos según el juego. |
+| Persistencia | MongoDB 9 (driver asíncrono de PyMongo) | Documentos flexibles para *setups* distintos según el juego. |
 | Cola y caché | Redis 7.4 (Streams + claves con TTL) | Un solo componente para eventos y caché, ligero de desplegar. |
 | Pruebas y calidad | pytest, ruff, hadolint | Tests unitarios y de integración, linter de Python y de Dockerfiles. |
 | Contenedores | Docker + Docker Compose | Entorno local reproducible (Hito 2). |

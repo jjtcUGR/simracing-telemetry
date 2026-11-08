@@ -67,7 +67,7 @@ services:
     depends_on: *depende-de-datos
 
   mongo:
-    image: mongo:8.0
+    image: mongo:9.0
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USUARIO}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
