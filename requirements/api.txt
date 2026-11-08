@@ -1,0 +1,4 @@
+# Dependencias de los servicios HTTP (Ingesta y Búsqueda)
+-r base.txt
+fastapi==0.162.2
+uvicorn==0.54.0
