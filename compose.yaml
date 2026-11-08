@@ -1,0 +1,110 @@
+# Entorno local completo: cp .env.example .env && docker compose up -d --build
+name: simracing-telemetry
+
+x-entorno-app: &entorno-app
+  MONGO_URL: mongodb://${MONGO_USUARIO:?Define MONGO_USUARIO en .env}:${MONGO_PASSWORD:?Define MONGO_PASSWORD en .env}@mongo:27017/?authSource=admin
+  MONGO_DB: ${MONGO_DB:-simracing}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Define REDIS_PASSWORD en .env}@redis:6379/0
+  API_TOKENS: ${API_TOKENS:?Define API_TOKENS en .env}
+  SALT_SEUDONIMO: ${SALT_SEUDONIMO:?Define SALT_SEUDONIMO en .env}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+# Endurecimiento común de los contenedores propios.
+x-seguridad: &seguridad
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
+x-depende-de-datos: &depende-de-datos
+  mongo:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+services:
+  ingesta:
+    <<: *seguridad
+    build:
+      context: .
+      dockerfile: services/ingesta/Dockerfile
+    image: ${REGISTRO:-ghcr.io/jjtcugr}/simracing-telemetry-ingesta:${TAG:-local}
+    environment: *entorno-app
+    ports:
+      - "${PUERTO_INGESTA:-8001}:8000"
+    networks:
+      - publica
+      - interna
+    depends_on: *depende-de-datos
+
+  busqueda:
+    <<: *seguridad
+    build:
+      context: .
+      dockerfile: services/busqueda/Dockerfile
+    image: ${REGISTRO:-ghcr.io/jjtcugr}/simracing-telemetry-busqueda:${TAG:-local}
+    environment: *entorno-app
+    ports:
+      - "${PUERTO_BUSQUEDA:-8002}:8000"
+    networks:
+      - publica
+      - interna
+    depends_on: *depende-de-datos
+
+  analisis:
+    <<: *seguridad
+    build:
+      context: .
+      dockerfile: services/analisis/Dockerfile
+    image: ${REGISTRO:-ghcr.io/jjtcugr}/simracing-telemetry-analisis:${TAG:-local}
+    environment: *entorno-app
+    networks:
+      - interna
+    depends_on: *depende-de-datos
+
+  mongo:
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USUARIO}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    volumes:
+      - mongo-datos:/data/db
+    networks:
+      - interna
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    volumes:
+      - redis-datos:/data
+    networks:
+      - interna
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+networks:
+  # Solo Ingesta y Búsqueda publican puertos; la base de datos y la cola no salen de "interna".
+  publica: {}
+  interna:
+    internal: true
+
+volumes:
+  mongo-datos: {}
+  redis-datos: {}
