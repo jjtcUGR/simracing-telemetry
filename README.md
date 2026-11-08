@@ -196,7 +196,7 @@ Resultado del análisis que añade el worker:
 
 ## 9. Gestión del proyecto
 
-* **Tablero:** GitHub Projects, con vistas agrupadas por *milestone* (un *milestone* por hito).
+* **Tablero:** [GitHub Projects](https://github.com/users/jjtcUGR/projects/1/views/2), con una vista agrupada por *milestone* (un *milestone* por hito).
 * **Historias de usuario:** *issues* con la etiqueta `user-story`, creadas con la plantilla [`.github/ISSUE_TEMPLATE/user_story.md`](.github/ISSUE_TEMPLATE/user_story.md).
 * **Pull requests:** con la plantilla [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
 * **Flujo de trabajo:** ramas y commits según [`docs/flujo-de-trabajo.md`](docs/flujo-de-trabajo.md).
