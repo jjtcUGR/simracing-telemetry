@@ -1,0 +1,6 @@
+# Solo entra en el contexto de construcción lo que los Dockerfiles copian.
+*
+!requirements/
+!src/
+**/__pycache__
+**/*.py[cod]

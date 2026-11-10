@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.13"
+
+jobs:
+  calidad:
+    name: Linters (Python, Dockerfiles y Compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements/*.txt
+
+      - name: Instalar dependencias de desarrollo
+        run: pip install -r requirements/dev.txt
+
+      - name: Ruff (lint)
+        run: ruff check --output-format=github .
+
+      - name: Ruff (formato)
+        run: ruff format --check .
+
+      - name: Hadolint (Dockerfiles)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          recursive: true
+          dockerfile: Dockerfile
+
+      - name: Validar compose.yaml
+        run: cp .env.example .env && docker compose config --quiet
+
+  pruebas:
+    name: Pruebas unitarias y de integración
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:9.0
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 3s --health-retries 10
+    env:
+      MONGO_URL: mongodb://localhost:27017
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements/*.txt
+
+      - name: Instalar dependencias de desarrollo
+        run: pip install -r requirements/dev.txt
+
+      - name: Pytest con cobertura
+        run: >-
+          pytest -v --cov=simracing --cov-report=term-missing
+          --cov-report=xml --junitxml=resultados-pytest.xml
+
+      - name: Guardar informes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informes-pruebas
+          path: |
+            resultados-pytest.xml
+            coverage.xml
+
+  imagenes:
+    name: Imagen ${{ matrix.servicio }}
+    needs: [calidad, pruebas]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        servicio: [ingesta, busqueda, analisis]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nombre de la imagen en minúsculas
+        id: nombre
+        run: echo "imagen=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/simracing-telemetry-${{ matrix.servicio }}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login en GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Etiquetas (hash del commit y versión semántica)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.nombre.outputs.imagen }}
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Construir y publicar
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.servicio }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.servicio }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.servicio }}
