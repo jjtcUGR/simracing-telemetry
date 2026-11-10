@@ -259,7 +259,7 @@ Cada componente tiene su propio [`Dockerfile`](services/) y se construye desde l
 
 | Decisión | Motivo |
 | :--- | :--- |
-| **Construcción multietapa** | La etapa `dependencias` crea un entorno virtual con los paquetes; la etapa `final` solo copia ese entorno y el código. `pip` queda fuera de la imagen final, igual que las cachés y los ficheros de requisitos. |
+| **Construcción multietapa** | La etapa `dependencias` crea un entorno virtual con los paquetes; la etapa `final` solo copia ese entorno y el código. Los ficheros de requisitos y cualquier resto de la instalación se quedan en la primera etapa y no llegan a la imagen final (además, `--no-cache-dir` evita guardar la caché de descargas de pip). |
 | **Imagen base `python:3.13-slim` (Debian trixie), versión exacta fijada** | Mucho más ligera que la imagen completa, que incluye compiladores y cabeceras que no hacen falta en ejecución. Usa glibc, así que pydantic-core y pymongo instalan *wheels* precompilados sin compilar nada. Alpine (musl) obligaría a compilar algunas dependencias y apenas ahorra tamaño. Las imágenes *distroless* dependen de la versión de Python de Debian y no traen shell, lo que complica los health checks y la depuración. |
 | **Usuario sin privilegios** | Cada imagen crea el usuario `app` (UID 10001) y se ejecuta con `USER app`. El código pertenece a `root`, así que el proceso puede leerlo pero no modificarlo. |
 | **Dependencias mínimas por servicio** | `requirements/base.txt` (Pydantic, PyMongo, Redis) es común. Las APIs añaden `api.txt` (FastAPI, Uvicorn) y el worker no, por lo que su imagen es más pequeña. |
